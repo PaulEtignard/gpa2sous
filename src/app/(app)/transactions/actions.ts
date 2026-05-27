@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { categorizeWithAI, categorizeBatchCompact, COMPACT_BATCH_SIZE } from "@/lib/ai/categorize";
 import { callOpenRouter } from "@/lib/ai/openrouter";
+import { extractMerchantKeyword } from "@/lib/merchant";
 
 export async function updateTransactionCategory(formData: FormData): Promise<void> {
   const id = String(formData.get("id"));
@@ -19,6 +20,86 @@ export async function updateTransactionCategory(formData: FormData): Promise<voi
   if (error) throw new Error(error.message);
   revalidatePath("/transactions");
   revalidatePath("/dashboard");
+}
+
+/** Direct (non-form) version used by CategorySelect. */
+export async function setCategoryDirect(id: string, categoryId: string | null): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Non authentifié.");
+
+  const { error } = await supabase
+    .from("transactions")
+    .update({ category_id: categoryId })
+    .eq("id", id)
+    .eq("user_id", user.id);
+
+  if (error) throw new Error(error.message);
+  revalidatePath("/transactions");
+  revalidatePath("/dashboard");
+}
+
+/**
+ * Find how many other transactions share the same merchant keyword and are not
+ * already in `categoryId`. Returns the keyword used and the count so the UI
+ * can offer a bulk-categorize action.
+ */
+export async function findSimilarMerchants(
+  excludeId: string,
+  description: string,
+  categoryId: string,
+): Promise<{ keyword: string; count: number }> {
+  const keyword = extractMerchantKeyword(description);
+  if (!keyword) return { keyword: "", count: 0 };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { keyword, count: 0 };
+
+  const { count } = await supabase
+    .from("transactions")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .ilike("description", `%${keyword}%`)
+    .neq("id", excludeId)
+    .or(`category_id.neq.${categoryId},category_id.is.null`);
+
+  return { keyword, count: count ?? 0 };
+}
+
+/**
+ * Bulk-categorize all transactions whose description contains `keyword` and
+ * that are not already in `categoryId`.
+ */
+export async function bulkCategorizeByMerchant(
+  keyword: string,
+  categoryId: string,
+): Promise<{ updated: number }> {
+  if (!keyword) return { updated: 0 };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Non authentifié.");
+
+  const { error } = await supabase
+    .from("transactions")
+    .update({ category_id: categoryId })
+    .eq("user_id", user.id)
+    .ilike("description", `%${keyword}%`)
+    .or(`category_id.neq.${categoryId},category_id.is.null`);
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/transactions");
+  revalidatePath("/dashboard");
+  revalidatePath("/budgets");
+  return { updated: 0 };
 }
 
 export async function deleteTransaction(formData: FormData): Promise<void> {

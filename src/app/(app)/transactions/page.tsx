@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
-import { deleteTransaction, updateTransactionCategory } from "./actions";
+import { deleteTransaction } from "./actions";
 import { AiCategorizeButton } from "@/components/transactions/ai-categorize-button";
 import { CategorySelect } from "@/components/transactions/category-select";
 
@@ -149,9 +149,9 @@ export default async function TransactionsPage({
                     <TableCell>
                       <CategorySelect
                         transactionId={t.id}
+                        description={t.description}
                         categoryId={t.category_id ?? null}
                         categories={categories ?? []}
-                        action={updateTransactionCategory}
                       />
                     </TableCell>
                     <TableCell
