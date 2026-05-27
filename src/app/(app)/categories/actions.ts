@@ -108,6 +108,39 @@ export async function seedDefaultCategories(): Promise<void> {
   revalidatePath("/categories");
 }
 
+/** Typed version of addRule — callable directly from client components. */
+export async function addRuleDirect(pattern: string, categoryId: string): Promise<void> {
+  const trimmed = pattern.trim();
+  if (!trimmed || !categoryId) throw new Error("Pattern et catégorie requis.");
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Non authentifié.");
+
+  const { error } = await supabase.from("rules").insert({
+    user_id: user.id,
+    pattern: trimmed,
+    category_id: categoryId,
+    priority: 50,
+  });
+  if (error) throw new Error(error.message);
+
+  // Retroactively apply to uncategorized transactions
+  await supabase
+    .from("transactions")
+    .update({ category_id: categoryId })
+    .ilike("description", `%${trimmed}%`)
+    .is("category_id", null)
+    .eq("user_id", user.id);
+
+  revalidatePath("/categories");
+  revalidatePath("/transactions");
+  revalidatePath("/dashboard");
+  revalidatePath("/budgets");
+}
+
 export async function addRule(formData: FormData): Promise<void> {
   const pattern = String(formData.get("pattern") ?? "").trim();
   const categoryId = String(formData.get("category_id"));
