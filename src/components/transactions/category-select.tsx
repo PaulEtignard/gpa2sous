@@ -95,7 +95,7 @@ export function CategorySelect({
           value={currentCategoryId ?? ""}
           onChange={(e) => handleChange(e.target.value)}
           disabled={isPending}
-          className="h-8 rounded-md border border-input bg-background px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-8 rounded-md border border-input bg-secondary px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
         >
           <option value="">Non catégorisé</option>
           {categories.map((c) => (
@@ -116,7 +116,7 @@ export function CategorySelect({
           onClick={handleDismiss}
         >
           <div
-            className="mx-4 w-full max-w-sm rounded-lg bg-background p-6 shadow-xl"
+            className="mx-4 w-full max-w-sm rounded-xl border border-border bg-card p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="mb-1 text-base font-semibold">

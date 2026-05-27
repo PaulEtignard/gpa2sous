@@ -63,7 +63,7 @@ export default async function CategoriesPage() {
               <select
                 name="kind"
                 defaultValue="expense"
-                className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                className="h-10 rounded-md border border-input bg-secondary px-3 text-sm"
               >
                 <option value="expense">Dépense</option>
                 <option value="income">Revenu</option>
@@ -118,7 +118,7 @@ export default async function CategoriesPage() {
               <select
                 name="category_id"
                 required
-                className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                className="h-10 rounded-md border border-input bg-secondary px-3 text-sm"
               >
                 <option value="">— catégorie —</option>
                 {cats.map((c) => (

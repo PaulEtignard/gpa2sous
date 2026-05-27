@@ -14,9 +14,9 @@ interface Props {
 
 export function HeroChart({ dailyData, net, income, expense, prevNet, month }: Props) {
   const isPositive = net >= 0;
-  const accentHex  = isPositive ? "#22c55e" : "#f87171";
-  const accentBg   = isPositive ? "rgba(34,197,94,0.14)"  : "rgba(248,113,113,0.14)";
-  const accentText = isPositive ? "#4ade80" : "#fca5a5";
+  const accentHex  = isPositive ? "#3b82f6" : "#f87171";
+  const accentBg   = isPositive ? "rgba(59,130,246,0.14)"  : "rgba(248,113,113,0.14)";
+  const accentText = isPositive ? "#93c5fd" : "#fca5a5";
 
   const diff    = net - prevNet;
   const diffPct = prevNet !== 0 ? (diff / Math.abs(prevNet)) * 100 : null;
@@ -116,7 +116,7 @@ export function HeroChart({ dailyData, net, income, expense, prevNet, month }: P
             <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-600">
               Revenus
             </p>
-            <p className="text-lg font-semibold text-green-400">
+            <p className="text-lg font-semibold text-blue-400">
               +{formatCurrency(income)}
             </p>
           </div>

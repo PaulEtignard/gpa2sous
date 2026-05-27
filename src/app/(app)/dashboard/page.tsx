@@ -36,33 +36,49 @@ export default async function DashboardPage() {
     Date.UTC(mostRecentDate.getUTCFullYear(), mostRecentDate.getUTCMonth() + 1, 1),
   );
 
+  // ── Helper ──────────────────────────────────────────────────────────────────
+  // Extract the category kind from a joined transaction row.
+  type TxRow = (typeof tx)[number];
+  const catKind = (t: TxRow): string | null =>
+    (t.categories as unknown as { name: string; color: string; kind: string } | null)?.kind ?? null;
+
+  // ── Period ───────────────────────────────────────────────────────────────────
   const inPeriod = tx.filter((t) => {
     const d = new Date(t.booked_at);
     return d >= periodStart && d < periodEnd;
   });
 
-  // ── KPIs ────────────────────────────────────────────────────────────────────
-  const income  = inPeriod.filter((t) => Number(t.amount) > 0).reduce((s, t) => s + Number(t.amount), 0);
-  const expense = inPeriod.filter((t) => Number(t.amount) < 0).reduce((s, t) => s + Number(t.amount), 0);
+  // Transfers between own accounts must NOT count as income or expense.
+  // A row is a transfer when its category has kind = 'transfer'.
+  // Uncategorized rows are kept as-is (we don't know if they're transfers).
+  const operational = inPeriod.filter((t) => catKind(t) !== "transfer");
+  const inPeriodTransfers = inPeriod.filter((t) => catKind(t) === "transfer");
+  const transferCount  = inPeriodTransfers.length;
+  const transferVolume = inPeriodTransfers.reduce((s, t) => s + Math.abs(Number(t.amount)), 0);
+
+  // ── KPIs ─────────────────────────────────────────────────────────────────────
+  const income  = operational.filter((t) => Number(t.amount) > 0).reduce((s, t) => s + Number(t.amount), 0);
+  const expense = operational.filter((t) => Number(t.amount) < 0).reduce((s, t) => s + Number(t.amount), 0);
   const net     = income + expense;
   const savingsRate = income > 0 ? (net / income) * 100 : null;
 
-  // ── Previous period (for comparison) ────────────────────────────────────────
+  // ── Previous period comparison (transfers also excluded) ─────────────────────
   const prevPeriodStart = new Date(
     Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() - 1, 1),
   );
-  const prevInPeriod = tx.filter((t) => {
-    const d = new Date(t.booked_at);
-    return d >= prevPeriodStart && d < periodStart;
-  });
-  const prevNet = prevInPeriod.reduce((s, t) => s + Number(t.amount), 0);
+  const prevNet = tx
+    .filter((t) => {
+      const d = new Date(t.booked_at);
+      return d >= prevPeriodStart && d < periodStart && catKind(t) !== "transfer";
+    })
+    .reduce((s, t) => s + Number(t.amount), 0);
 
-  // ── Daily cumulative (for hero area chart) ───────────────────────────────────
+  // ── Daily cumulative for hero chart (operational only) ───────────────────────
   const daysInMonth = new Date(
     Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, 0),
   ).getUTCDate();
   const dailyNetMap = new Map<number, number>();
-  for (const t of inPeriod) {
+  for (const t of operational) {
     const day = new Date(t.booked_at).getUTCDate();
     dailyNetMap.set(day, (dailyNetMap.get(day) ?? 0) + Number(t.amount));
   }
@@ -73,11 +89,11 @@ export default async function DashboardPage() {
     return { day, value: Math.round(cumulative * 100) / 100 };
   });
 
-  // ── Category breakdown ───────────────────────────────────────────────────────
+  // ── Category breakdown (transfers excluded, expenses only) ───────────────────
   const categoryTotals = new Map<string, { name: string; color: string; total: number }>();
-  for (const t of inPeriod) {
+  for (const t of operational) {
     if (Number(t.amount) >= 0) continue;
-    const cat = (t.categories as unknown as { name: string; color: string; kind: string } | null);
+    const cat   = (t.categories as unknown as { name: string; color: string; kind: string } | null);
     const key   = cat?.name  ?? "Non catégorisé";
     const color = cat?.color ?? "#94a3b8";
     const entry = categoryTotals.get(key) ?? { name: key, color, total: 0 };
@@ -88,9 +104,10 @@ export default async function DashboardPage() {
     .sort((a, b) => b.total - a.total)
     .slice(0, 7);
 
-  // ── Monthly trend (12 months) ────────────────────────────────────────────────
+  // ── Monthly trend — 12 months, transfers excluded ────────────────────────────
   const monthlyMap = new Map<string, { month: string; income: number; expense: number }>();
   for (const t of tx) {
+    if (catKind(t) === "transfer") continue; // exclude inter-account moves
     const d   = new Date(t.booked_at);
     const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
     const entry = monthlyMap.get(key) ?? { month: key, income: 0, expense: 0 };
@@ -103,13 +120,14 @@ export default async function DashboardPage() {
     .sort((a, b) => a.month.localeCompare(b.month))
     .slice(-12);
 
-  // ── Recent transactions ──────────────────────────────────────────────────────
+  // ── Recent transactions ───────────────────────────────────────────────────────
   const recentTx = tx.slice(0, 5).map((t) => ({
     id: t.id,
     bookedAt: t.booked_at,
     description: t.description,
     amount: Number(t.amount),
     cat: (t.categories as unknown as { name: string; color: string } | null),
+    isTransfer: catKind(t) === "transfer",
   }));
 
   const now = new Date();
@@ -177,6 +195,15 @@ export default async function DashboardPage() {
         />
       </div>
 
+      {/* ── Transfer exclusion notice ────────────────────────────────────── */}
+      {transferCount > 0 && (
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/50" />
+          {transferCount} transfert{transferCount > 1 ? "s" : ""} inter-comptes exclu{transferCount > 1 ? "s" : ""}
+          {" "}({formatCurrency(transferVolume)} mouvementés, hors débit/crédit)
+        </p>
+      )}
+
       {/* ── Two-column row ──────────────────────────────────────────────── */}
       <div className="grid gap-4 lg:grid-cols-2">
 
@@ -221,14 +248,23 @@ export default async function DashboardPage() {
                       <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-muted-foreground/30" />
                     )}
                     <div className="min-w-0">
-                      <p className="truncate font-medium">{t.description}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="truncate font-medium">{t.description}</p>
+                        {t.isTransfer && (
+                          <span className="shrink-0 rounded px-1 py-0 text-[10px] font-semibold uppercase tracking-wide text-primary/60 ring-1 ring-primary/20">
+                            virement
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground">{formatDate(t.bookedAt)}</p>
                     </div>
                   </div>
                   <span
                     className={cn(
                       "shrink-0 font-semibold tabular-nums",
-                      t.amount >= 0 ? "text-green-500" : "text-red-500",
+                      t.isTransfer
+                        ? "text-muted-foreground"
+                        : t.amount >= 0 ? "text-blue-400" : "text-red-400",
                     )}
                   >
                     {t.amount >= 0 ? "+" : ""}
@@ -280,13 +316,13 @@ function KpiCard({
   tone?: "positive" | "negative" | "neutral";
 }) {
   const iconColor =
-    tone === "positive" ? "text-green-500"
-    : tone === "negative" ? "text-red-500"
+    tone === "positive" ? "text-blue-400"
+    : tone === "negative" ? "text-red-400"
     : "text-muted-foreground";
 
   const valueColor =
-    tone === "positive" ? "text-green-500"
-    : tone === "negative" ? "text-red-500"
+    tone === "positive" ? "text-blue-400"
+    : tone === "negative" ? "text-red-400"
     : "";
 
   return (

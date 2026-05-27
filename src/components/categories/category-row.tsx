@@ -76,7 +76,7 @@ export function CategoryRow({ category }: { category: Category }) {
       <select
         name="kind"
         defaultValue={category.kind}
-        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+        className="h-9 rounded-md border border-input bg-secondary px-2 text-sm"
       >
         <option value="expense">Dépense</option>
         <option value="income">Revenu</option>

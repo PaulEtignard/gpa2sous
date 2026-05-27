@@ -98,7 +98,7 @@ export function JobNotification() {
       {notifications.map((n) => (
         <div
           key={n.jobId}
-          className="flex items-start gap-2 rounded-md border border-border bg-background p-2 text-xs"
+          className="flex items-start gap-2 rounded-md border border-border bg-secondary p-2 text-xs"
         >
           {n.status === "running" && (
             <>

@@ -74,7 +74,7 @@ export function MonthlyTrendChart({
           <Bar
             dataKey="income"
             name="Revenus"
-            fill="#4ade80"
+            fill="#3b82f6"
             radius={[4, 4, 0, 0]}
             maxBarSize={28}
           />

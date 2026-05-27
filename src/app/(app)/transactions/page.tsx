@@ -24,7 +24,7 @@ export default async function TransactionsPage({
 
   let query = supabase
     .from("transactions")
-    .select("id, booked_at, description, amount, currency, account_id, category_id, accounts(name), categories(name, color)")
+    .select("id, booked_at, description, amount, currency, account_id, category_id, accounts(name), categories(name, color, kind)")
     .order("booked_at", { ascending: false })
     .limit(500);
 
@@ -82,7 +82,7 @@ export default async function TransactionsPage({
               <select
                 name="account"
                 defaultValue={params.account ?? ""}
-                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                className="h-9 rounded-md border border-input bg-secondary px-2 text-sm"
               >
                 <option value="">Tous</option>
                 {(accounts ?? []).map((a) => (
@@ -97,7 +97,7 @@ export default async function TransactionsPage({
               <select
                 name="cat"
                 defaultValue={params.cat ?? ""}
-                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                className="h-9 rounded-md border border-input bg-secondary px-2 text-sm"
               >
                 <option value="">Toutes</option>
                 <option value="uncategorized">Non catégorisées</option>
@@ -114,7 +114,7 @@ export default async function TransactionsPage({
                 name="q"
                 defaultValue={params.q ?? ""}
                 placeholder="Ex: carrefour"
-                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                className="h-9 rounded-md border border-input bg-secondary px-2 text-sm"
               />
             </div>
             <Button type="submit" size="sm" variant="outline">
@@ -139,12 +139,22 @@ export default async function TransactionsPage({
             </TableHeader>
             <TableBody>
               {(transactions ?? []).map((t) => {
-                const account = t.accounts as unknown as { name: string } | null;
-                const cat = t.categories as unknown as { name: string; color: string } | null;
+                const account    = t.accounts as unknown as { name: string } | null;
+                const cat        = t.categories as unknown as { name: string; color: string; kind: string } | null;
+                const isTransfer = cat?.kind === "transfer";
                 return (
                   <TableRow key={t.id}>
                     <TableCell className="font-mono text-xs">{formatDate(t.booked_at)}</TableCell>
-                    <TableCell className="max-w-[280px] truncate font-medium">{t.description}</TableCell>
+                    <TableCell className="max-w-[280px]">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate font-medium">{t.description}</span>
+                        {isTransfer && (
+                          <span className="shrink-0 rounded px-1 text-[10px] font-semibold uppercase tracking-wide text-primary/60 ring-1 ring-primary/20">
+                            virement
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{account?.name ?? "—"}</TableCell>
                     <TableCell>
                       <CategorySelect
@@ -157,7 +167,9 @@ export default async function TransactionsPage({
                     <TableCell
                       className={cn(
                         "text-right font-mono",
-                        Number(t.amount) < 0 ? "text-destructive" : "text-success",
+                        isTransfer
+                          ? "text-muted-foreground"
+                          : Number(t.amount) < 0 ? "text-destructive" : "text-success",
                       )}
                     >
                       {formatCurrency(Number(t.amount), t.currency)}
