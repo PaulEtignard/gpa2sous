@@ -9,15 +9,17 @@ import {
   LayoutDashboard,
   ListOrdered,
   LogOut,
+  RefreshCw,
   Tags,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { JobNotification } from "./job-notification";
 
 const primaryNav = [
-  { href: "/dashboard",    label: "Tableau de bord", icon: LayoutDashboard },
-  { href: "/transactions", label: "Transactions",    icon: ListOrdered },
-  { href: "/budgets",      label: "Budgets",         icon: BarChart3 },
+  { href: "/dashboard",     label: "Tableau de bord", icon: LayoutDashboard },
+  { href: "/transactions",  label: "Transactions",    icon: ListOrdered },
+  { href: "/budgets",       label: "Budgets",         icon: BarChart3 },
+  { href: "/subscriptions", label: "Abonnements",     icon: RefreshCw },
 ];
 
 const manageNav = [

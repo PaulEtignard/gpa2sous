@@ -57,6 +57,25 @@ export interface Budget {
   created_at: string;
 }
 
+export interface Subscription {
+  id: string;
+  user_id: string;
+  description_pattern: string;
+  example_description: string | null;
+  display_name: string | null;
+  domain: string | null;
+  logo_url: string | null;
+  period_days: number;
+  avg_amount: number;
+  currency: string;
+  last_charged_at: string | null;
+  next_expected_at: string | null;
+  occurrence_count: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ImportBatch {
   id: string;
   user_id: string;
