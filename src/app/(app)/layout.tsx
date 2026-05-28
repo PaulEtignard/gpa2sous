@@ -10,9 +10,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   if (!user) redirect("/login");
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+  const isAdmin = profile?.role === "admin";
+
   return (
     <div className="flex min-h-screen">
-      <Sidebar email={user.email ?? ""} />
+      <Sidebar email={user.email ?? ""} isAdmin={isAdmin} />
       <main className="relative flex-1 overflow-auto">
         <div
           className="pointer-events-none fixed inset-0 -z-10"

@@ -81,6 +81,30 @@ export interface Subscription {
   updated_at: string;
 }
 
+export interface Profile {
+  id: string;
+  email: string | null;
+  role: "user" | "admin";
+  created_at: string;
+}
+
+export interface Merchant {
+  id: string;
+  display_name: string;
+  domain: string | null;
+  logo_url: string | null;
+  source: "seed" | "ai" | "manual";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MerchantAlias {
+  id: string;
+  merchant_id: string;
+  pattern: string;
+  created_at: string;
+}
+
 export interface ImportBatch {
   id: string;
   user_id: string;

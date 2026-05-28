@@ -10,6 +10,7 @@ import {
   ListOrdered,
   LogOut,
   RefreshCw,
+  Shield,
   Tags,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,13 @@ const manageNav = [
   { href: "/accounts",    label: "Comptes",     icon: CreditCard },
   { href: "/categories",  label: "Catégories",  icon: Tags },
   { href: "/import",      label: "Importer",    icon: FileUp },
+];
+
+const adminNav = [
+  { href: "/admin",           label: "Vue d'ensemble", icon: Shield },
+  { href: "/admin/merchants", label: "Commerçants",    icon: Tags },
+  { href: "/admin/users",     label: "Utilisateurs",   icon: CreditCard },
+  { href: "/admin/jobs",      label: "Jobs",           icon: RefreshCw },
 ];
 
 function NavItem({
@@ -67,6 +75,12 @@ function NavItem({
 }
 
 function NavSection({ label, items, pathname }: { label: string; items: typeof primaryNav; pathname: string }) {
+  // The active item is the longest href that matches the current path. This
+  // keeps "/admin" (overview) from staying lit on "/admin/merchants".
+  const activeHref = items
+    .filter((i) => pathname === i.href || pathname.startsWith(i.href + "/"))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
+
   return (
     <div>
       <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-zinc-700">
@@ -74,18 +88,14 @@ function NavSection({ label, items, pathname }: { label: string; items: typeof p
       </p>
       <div className="space-y-0.5">
         {items.map((item) => (
-          <NavItem
-            key={item.href}
-            {...item}
-            active={pathname === item.href || pathname.startsWith(item.href + "/")}
-          />
+          <NavItem key={item.href} {...item} active={item.href === activeHref} />
         ))}
       </div>
     </div>
   );
 }
 
-export function Sidebar({ email }: { email: string }) {
+export function Sidebar({ email, isAdmin = false }: { email: string; isAdmin?: boolean }) {
   const pathname = usePathname();
   const initials = email.slice(0, 2).toUpperCase();
 
@@ -125,6 +135,7 @@ export function Sidebar({ email }: { email: string }) {
       <nav className="flex-1 space-y-5 overflow-y-auto px-2 py-4">
         <NavSection label="Analyse" items={primaryNav} pathname={pathname} />
         <NavSection label="Gestion" items={manageNav} pathname={pathname} />
+        {isAdmin && <NavSection label="Administration" items={adminNav} pathname={pathname} />}
       </nav>
 
       {/* Job notification */}
