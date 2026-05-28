@@ -16,6 +16,7 @@ const PAGE_SIZE = 50;
 type Params = {
   account?: string;
   cat?: string;
+  type?: string;
   q?: string;
   from?: string;
   to?: string;
@@ -28,6 +29,7 @@ function buildUrl(base: Params, overrides: Partial<Params>): string {
   const sp = new URLSearchParams();
   if (merged.account) sp.set("account", merged.account);
   if (merged.cat)     sp.set("cat",     merged.cat);
+  if (merged.type)    sp.set("type",    merged.type);
   if (merged.q)       sp.set("q",       merged.q);
   if (merged.from)    sp.set("from",    merged.from);
   if (merged.to)      sp.set("to",      merged.to);
@@ -77,6 +79,8 @@ export default async function TransactionsPage({
   if (params.account)              txQuery = txQuery.eq("account_id", params.account);
   if (params.cat === "uncategorized") txQuery = txQuery.is("category_id", null);
   else if (params.cat)             txQuery = txQuery.eq("category_id", params.cat);
+  if (params.type === "credit")    txQuery = txQuery.gt("amount", 0);
+  if (params.type === "debit")     txQuery = txQuery.lt("amount", 0);
   if (params.q)                    txQuery = txQuery.ilike("description", `%${params.q}%`);
   if (params.from)                 txQuery = txQuery.gte("booked_at", params.from);
   if (params.to)                   txQuery = txQuery.lte("booked_at", params.to + "T23:59:59");
@@ -137,11 +141,11 @@ export default async function TransactionsPage({
           {/* Filters reset page to 1 automatically (no hidden page input) */}
           <form className="flex flex-wrap items-end gap-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Compte</label>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Compte</label>
               <select
                 name="account"
                 defaultValue={params.account ?? ""}
-                className="h-9 rounded-md border border-input bg-secondary px-2 text-sm"
+                className="h-9 cursor-pointer rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition-all"
               >
                 <option value="">Tous</option>
                 {(accounts ?? []).map((a) => (
@@ -151,11 +155,11 @@ export default async function TransactionsPage({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Catégorie</label>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Catégorie</label>
               <select
                 name="cat"
                 defaultValue={params.cat ?? ""}
-                className="h-9 rounded-md border border-input bg-secondary px-2 text-sm"
+                className="h-9 cursor-pointer rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition-all"
               >
                 <option value="">Toutes</option>
                 <option value="uncategorized">Non catégorisées</option>
@@ -166,32 +170,45 @@ export default async function TransactionsPage({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Du</label>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Type</label>
+              <select
+                name="type"
+                defaultValue={params.type ?? ""}
+                className="h-9 cursor-pointer rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition-all"
+              >
+                <option value="">Tous</option>
+                <option value="credit">Crédits</option>
+                <option value="debit">Débits</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Du</label>
               <input
                 type="date"
                 name="from"
                 defaultValue={params.from ?? ""}
-                className="h-9 rounded-md border border-input bg-secondary px-2 text-sm [color-scheme:dark]"
+                className="h-9 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition-all [color-scheme:dark]"
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Au</label>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Au</label>
               <input
                 type="date"
                 name="to"
                 defaultValue={params.to ?? ""}
-                className="h-9 rounded-md border border-input bg-secondary px-2 text-sm [color-scheme:dark]"
+                className="h-9 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition-all [color-scheme:dark]"
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Recherche</label>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Recherche</label>
               <input
                 name="q"
                 defaultValue={params.q ?? ""}
                 placeholder="Ex : carrefour"
-                className="h-9 rounded-md border border-input bg-secondary px-2 text-sm"
+                className="h-9 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground placeholder:text-zinc-700 focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition-all"
               />
             </div>
 
@@ -199,7 +216,7 @@ export default async function TransactionsPage({
               <Button type="submit" size="sm" variant="outline">
                 Filtrer
               </Button>
-              {(params.account || params.cat || params.q || params.from || params.to) && (
+              {(params.account || params.cat || params.type || params.q || params.from || params.to) && (
                 <Link href="/transactions">
                   <Button type="button" size="sm" variant="ghost" className="text-muted-foreground">
                     Réinitialiser

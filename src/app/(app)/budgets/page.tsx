@@ -179,7 +179,7 @@ export default async function BudgetsPage() {
                       min="0"
                       defaultValue={budget || ""}
                       placeholder="Budget"
-                      className="h-9 w-28"
+                      className="h-9 w-28 rounded-lg border border-white/[0.08] bg-white/[0.03]"
                     />
                     <Button type="submit" size="sm" variant="outline">
                       OK

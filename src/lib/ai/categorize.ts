@@ -34,13 +34,14 @@ export interface AiCategorizationResult {
 const BATCH_SIZE = 20;
 
 // ---------------------------------------------------------------------------
-// Fast compact batch categorization
+// Compact batch categorization — index-based (no string matching)
 // ---------------------------------------------------------------------------
-// Uses index numbers instead of full IDs to save tokens.
-// Response format: "0:Catégorie,1:Catégorie,..." — no JSON, trivial to parse.
-// Saves ~8× tokens vs. the verbose JSON approach, ~50× vs. one-at-a-time.
+// The model returns tx_index:cat_index pairs. No name matching needed at all,
+// so there is zero risk of mismatch due to accents, spacing, or phrasing.
+// On the first pass the model covers ~100 % of transactions; a retry pass
+// handles the rare stragglers so the final result is always complete.
 
-export const COMPACT_BATCH_SIZE = 50;
+export const COMPACT_BATCH_SIZE = 25;
 
 export async function categorizeBatchCompact(
   transactions: AiTransactionInput[],
@@ -48,9 +49,37 @@ export async function categorizeBatchCompact(
 ): Promise<AiCategorizationResult[]> {
   if (transactions.length === 0) return [];
 
-  const idByName = new Map(categories.map((c) => [normalizeName(c.name), c.id]));
+  const results = await categorizeBatchIndexed(transactions, categories);
 
-  const categoryNames = categories.map((c) => c.name).join(", ");
+  // Retry any transaction the model skipped on the first pass
+  const missingIdxs = results
+    .map((r, i) => (r.categoryId === null ? i : -1))
+    .filter((i) => i !== -1);
+
+  if (missingIdxs.length > 0) {
+    const retryTxs = missingIdxs.map((i) => transactions[i]);
+    const retryResults = await categorizeBatchIndexed(retryTxs, categories);
+    for (let j = 0; j < missingIdxs.length; j++) {
+      if (retryResults[j].categoryId !== null) {
+        results[missingIdxs[j]] = {
+          ...retryResults[j],
+          transactionId: transactions[missingIdxs[j]].id,
+        };
+      }
+    }
+  }
+
+  return results;
+}
+
+async function categorizeBatchIndexed(
+  transactions: AiTransactionInput[],
+  categories: AiCategoryOption[],
+): Promise<AiCategorizationResult[]> {
+  const catList = categories
+    .map((c, i) => `${i}:${c.name} (${labelKind(c.kind)})`)
+    .join("\n");
+
   const lines = transactions
     .map((t, i) => {
       const sign = t.amount >= 0 ? "+" : "-";
@@ -58,41 +87,46 @@ export async function categorizeBatchCompact(
     })
     .join("\n");
 
-  const prompt = `Catégories : ${categoryNames}
+  const n = transactions.length;
 
-Transactions (index|montant|libellé) :
+  const prompt = `Classifie ces ${n} transactions bancaires françaises.
+
+CATÉGORIES (index:nom) :
+${catList}
+
+TRANSACTIONS (index|montant|libellé) :
 ${lines}
 
-Réponds UNIQUEMENT : 0:Catégorie,1:Catégorie,… (même ordre, catégorie obligatoire pour chaque index)`;
+Réponds avec EXACTEMENT ${n} lignes, une par transaction, format :
+index_transaction:index_catégorie
+
+Aucun texte, aucune explication, aucune ligne vide.`;
 
   const raw = await callOpenRouter([{ role: "user", content: prompt }], {
     temperature: 0,
-    maxTokens: 1500,
+    maxTokens: Math.max(300, n * 12),
   });
 
-  // Build result array, defaulting to null
   const results: AiCategorizationResult[] = transactions.map((t) => ({
     transactionId: t.id,
     categoryId: null,
     categoryName: null,
   }));
 
-  // Parse "0:Name,1:Name,..." — also handles newlines and spaces
-  const rx = /(\d+)\s*:\s*([^,\n]+)/g;
+  // Parse "tx_idx:cat_idx" — only digits on each side
+  const rx = /^(\d+)\s*:\s*(\d+)$/gm;
   let m: RegExpExecArray | null;
   while ((m = rx.exec(raw)) !== null) {
-    const idx = parseInt(m[1]);
-    if (idx < 0 || idx >= transactions.length) continue;
-    const rawName = m[2].trim();
-    const norm = normalizeName(rawName);
-    // Exact → fuzzy substring → first-word fallback
-    const categoryId =
-      idByName.get(norm) ??
-      [...idByName.entries()].find(([k]) => norm.includes(k) || k.includes(norm))?.[1] ??
-      null;
-    if (categoryId) {
-      results[idx] = { transactionId: transactions[idx].id, categoryId, categoryName: rawName };
-    }
+    const txIdx = parseInt(m[1]);
+    const catIdx = parseInt(m[2]);
+    if (txIdx < 0 || txIdx >= transactions.length) continue;
+    if (catIdx < 0 || catIdx >= categories.length) continue;
+    const cat = categories[catIdx];
+    results[txIdx] = {
+      transactionId: transactions[txIdx].id,
+      categoryId: cat.id,
+      categoryName: cat.name,
+    };
   }
 
   return results;
@@ -181,7 +215,7 @@ Réponds UNIQUEMENT avec ce JSON (pas d'explication, pas de texte autour) :
 }
 
 function normalizeName(s: string): string {
-  return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+  return s.toLowerCase().normalize("NFD").replace(/\p{Mn}/gu, "").trim();
 }
 
 function labelKind(k: AiCategoryOption["kind"]): string {

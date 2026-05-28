@@ -25,7 +25,7 @@ export function CategoryRow({ category }: { category: Category }) {
 
   if (!editing) {
     return (
-      <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+      <div className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5 transition-colors hover:bg-white/[0.03]">
         <div className="flex items-center gap-3">
           <span
             className="inline-block h-3 w-3 rounded-full"
@@ -76,7 +76,7 @@ export function CategoryRow({ category }: { category: Category }) {
       <select
         name="kind"
         defaultValue={category.kind}
-        className="h-9 rounded-md border border-input bg-secondary px-2 text-sm"
+        className="h-9 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15"
       >
         <option value="expense">Dépense</option>
         <option value="income">Revenu</option>

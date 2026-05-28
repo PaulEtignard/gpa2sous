@@ -31,62 +31,94 @@
 
 /* ── Forced dark theme ───────────────────────────────────────────────────── */
 :root {
-  /* Blue accent: hsl(217 91% 60%) ≈ #3b82f6 */
+  --background:             222 28%  5%;
+  --foreground:             213 20% 93%;
 
-  --background:             222 28%  5%;   /* #08091'2  very dark navy-black  */
-  --foreground:             213 20% 93%;   /* #e8edf5  near-white             */
-
-  --card:                   224 24%  8%;   /* #0d1222  elevated surface       */
+  --card:                   224 24%  8%;
   --card-foreground:        213 20% 93%;
 
-  --popover:                224 24%  9%;
+  --popover:                224 26% 10%;
   --popover-foreground:     213 20% 93%;
 
-  --primary:                217 91% 60%;   /* #3b82f6  vibrant blue           */
+  --primary:                217 91% 60%;
   --primary-foreground:       0  0% 100%;
 
-  --secondary:              224 20% 13%;   /* #18202e  subtle surface         */
+  --secondary:              224 20% 13%;
   --secondary-foreground:   213 15% 72%;
 
   --muted:                  224 20% 12%;
-  --muted-foreground:       217 14% 48%;   /* #68778f  muted text             */
+  --muted-foreground:       217 14% 48%;
 
   --accent:                 224 20% 14%;
   --accent-foreground:      213 20% 93%;
 
-  --destructive:              0 72% 51%;   /* red — expenses / errors         */
+  --destructive:              0 72% 51%;
   --destructive-foreground:   0  0% 98%;
 
-  /* ⚡ Blue replaces green for success / positive values */
-  --success:                217 91% 60%;   /* same as primary                 */
+  --success:                217 91% 60%;
   --success-foreground:       0  0% 100%;
 
-  --border:                 224 18% 14%;   /* #1b2436  very subtle border     */
-  --input:                  224 18% 14%;
+  --border:                 224 18% 13%;
+  --input:                  224 18% 13%;
   --ring:                   217 91% 60%;
 
   --radius:                 0.75rem;
 }
 
-/* ── Base ───────────────────────────────────────────────────────────────── */
+/* ── Base ────────────────────────────────────────────────────────────────── */
 * {
   border-color: hsl(var(--border));
 }
 
 body {
   background-color: hsl(var(--background));
+  background-image:
+    radial-gradient(ellipse 100% 55% at 50% -10%, rgba(59, 130, 246, 0.07) 0%, transparent 65%);
   color: hsl(var(--foreground));
   font-family: var(--font-sans), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── Scrollbar (dark) ───────────────────────────────────────────────────── */
-::-webkit-scrollbar          { width: 6px; height: 6px; }
-::-webkit-scrollbar-track    { background: transparent; }
-::-webkit-scrollbar-thumb    { background: hsl(224 18% 20%); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: hsl(217 91% 60% / 0.5); }
+/* ── Card surface ────────────────────────────────────────────────────────── */
+.card-surface {
+  background: linear-gradient(145deg, hsl(224 28% 10%) 0%, hsl(222 28% 7%) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 8px 32px rgba(0, 0, 0, 0.25);
+}
 
-/* ── Selection ──────────────────────────────────────────────────────────── */
+/* ── Scrollbar (dark) ────────────────────────────────────────────────────── */
+::-webkit-scrollbar          { width: 5px; height: 5px; }
+::-webkit-scrollbar-track    { background: transparent; }
+::-webkit-scrollbar-thumb    { background: rgba(255,255,255,0.08); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(217 91% 60% / 0.4); }
+
+/* ── Selection ───────────────────────────────────────────────────────────── */
 ::selection {
   background: hsl(217 91% 60% / 0.25);
+}
+
+/* ── Animations ──────────────────────────────────────────────────────────── */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out both;
+}
+
+/* ── Native form elements ────────────────────────────────────────────────── */
+select,
+input[type="date"],
+input[type="color"] {
+  color-scheme: dark;
+}
+
+/* ── Focus ring utility ──────────────────────────────────────────────────── */
+.focus-ring {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.5);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }

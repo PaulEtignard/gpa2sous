@@ -95,7 +95,7 @@ export function CategorySelect({
           value={currentCategoryId ?? ""}
           onChange={(e) => handleChange(e.target.value)}
           disabled={isPending}
-          className="h-8 rounded-md border border-input bg-secondary px-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-8 cursor-pointer rounded-lg border border-white/[0.07] bg-white/[0.03] px-2 text-xs text-foreground transition-all focus:outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <option value="">Non catégorisé</option>
           {categories.map((c) => (
@@ -110,41 +110,38 @@ export function CategorySelect({
       </div>
 
       {dialog && (
-        /* Backdrop — clicking outside dismisses */
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
           onClick={handleDismiss}
         >
           <div
-            className="mx-4 w-full max-w-sm rounded-xl border border-border bg-card p-6"
+            className="card-surface mx-4 w-full max-w-sm animate-fade-in rounded-2xl p-6"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="mb-1 text-base font-semibold">
+            <h3 className="mb-1.5 text-base font-semibold">
               Catégorisation groupée
             </h3>
-            <p className="mb-5 text-sm text-muted-foreground">
+            <p className="mb-5 text-sm text-zinc-500 leading-relaxed">
               {dialog.count} autre{dialog.count > 1 ? "s" : ""} transaction
-              {dialog.count > 1 ? "s" : ""} contenant &laquo;&nbsp;
-              <span className="font-medium text-foreground">{dialog.keyword}</span>
-              &nbsp;&raquo; {dialog.count > 1 ? "ne sont" : "n'est"} pas encore
-              dans cette catégorie. Les catégoriser en&nbsp;
-              <span className="font-medium text-foreground">
-                {dialog.newCategoryName}
-              </span>
+              {dialog.count > 1 ? "s" : ""} contenant{" "}
+              <span className="font-medium text-foreground">&laquo;&nbsp;{dialog.keyword}&nbsp;&raquo;</span>{" "}
+              {dialog.count > 1 ? "ne sont" : "n'est"} pas encore dans cette catégorie.
+              Les catégoriser en{" "}
+              <span className="font-medium text-foreground">{dialog.newCategoryName}</span>
               &nbsp;?
             </p>
             <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={handleDismiss}
-                className="rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted"
+                className="cursor-pointer rounded-lg px-3 py-2 text-sm text-zinc-500 transition-colors hover:bg-white/[0.04] hover:text-zinc-300"
               >
                 Non, juste celle-ci
               </button>
               <button
                 type="button"
                 onClick={handleConfirm}
-                className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                className="cursor-pointer rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-all hover:bg-primary/90 hover:shadow-[0_0_20px_rgba(59,130,246,0.28)]"
               >
                 Oui, toutes ({dialog.count})
               </button>
