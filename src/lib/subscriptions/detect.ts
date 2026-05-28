@@ -32,6 +32,13 @@ function stddev(arr: number[]): number {
   return Math.sqrt(arr.reduce((s, v) => s + (v - mean) ** 2, 0) / arr.length);
 }
 
+function median(arr: number[]): number {
+  if (arr.length === 0) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
 // Maximum allowed interval deviation per period type (in days).
 // "A subscription can be 2 days late" → use 5d for monthly (covers weekends, bank delays).
 const INTERVAL_TOLERANCE: Record<number, number> = {
@@ -59,9 +66,29 @@ export function detectSubscriptions(transactions: TxInput[]): SubscriptionCandid
   for (const [, txs] of groups) {
     if (txs.length < 2) continue;
 
-    const sorted = [...txs].sort((a, b) => a.booked_at.localeCompare(b.booked_at));
+    const sortedAll = [...txs].sort((a, b) => a.booked_at.localeCompare(b.booked_at));
 
-    // Compute day-intervals between consecutive occurrences
+    // ── Amount filtering — keep only rows close to the current price ──────
+    // True subscriptions have a stable price BUT can change once or twice
+    // over time (promo → standard, annual hike, plan switch). Some banks
+    // also issue one-off pro-rata credits/refunds that look unrelated.
+    // We use the median amount as the reference and keep only transactions
+    // within ±15 % of it. This survives a single price change without losing
+    // the subscription, while still rejecting variable-spend merchants
+    // (e.g. food orders, fuel) where median is meaningless.
+    const allAmounts = sortedAll.map((t) => Math.abs(Number(t.amount)));
+    const medAmount = median(allAmounts);
+    if (medAmount <= 0) continue;
+
+    const inRange = (a: number) => Math.abs(a - medAmount) / medAmount <= 0.15;
+    const sorted = sortedAll.filter((t) => inRange(Math.abs(Number(t.amount))));
+
+    // Need at least 2 stable-price occurrences AND ≥ 60 % of all hits at this
+    // merchant must match the dominant price (rejects "noisy" merchants).
+    if (sorted.length < 2) continue;
+    if (sorted.length / sortedAll.length < 0.6) continue;
+
+    // ── Interval analysis on the stable subset ────────────────────────────
     const intervals: number[] = [];
     for (let i = 1; i < sorted.length; i++) {
       const days = Math.round(
@@ -74,39 +101,27 @@ export function detectSubscriptions(transactions: TxInput[]): SubscriptionCandid
 
     const medianInterval = [...intervals].sort((a, b) => a - b)[Math.floor(intervals.length / 2)];
 
-    // Classify as weekly / monthly / annual
     let periodDays: number;
     if (medianInterval >= 6 && medianInterval <= 9) periodDays = 7;
     else if (medianInterval >= 20 && medianInterval <= 45) periodDays = 30;
     else if (medianInterval >= 300 && medianInterval <= 400) periodDays = 365;
     else continue;
 
-    // Minimum occurrences (weekly needs more data to be reliable)
     if (periodDays === 7 && sorted.length < 4) continue;
 
     const tolerance = INTERVAL_TOLERANCE[periodDays];
 
-    // ── Strict interval check ──────────────────────────────────────────────
-    // ALL intervals must be within ±tolerance of the nominal period.
-    // This rejects irregular purchases (e.g. food orders that happen monthly
-    // but not on a fixed schedule).
-    const allIntervalsConsistent = intervals.every(
-      (v) => Math.abs(v - periodDays) <= tolerance,
-    );
-    if (!allIntervalsConsistent) continue;
+    // Allow ONE off-tolerance interval (handles plan changes mid-cycle
+    // and bank-side date drift). Reject only when ≥ 2 intervals deviate.
+    const offCount = intervals.filter((v) => Math.abs(v - periodDays) > tolerance).length;
+    if (offCount >= 2) continue;
+    if (offCount >= 1 && intervals.length < 3) continue;
 
-    // Also require low standard deviation (catches cases where two extreme
-    // outliers cancel each other out but are still irregular).
-    if (stddev(intervals) > tolerance * 0.8) continue;
+    if (stddev(intervals) > tolerance * 1.0) continue;
 
-    // ── Strict amount check ────────────────────────────────────────────────
-    // True subscriptions have a fixed price. Allow a small tolerance for
-    // annual price increases (e.g. Netflix going from €13.99 to €15.99).
-    // This rejects variable-amount purchases like food orders.
+    // ── Build candidate using only the stable subset ───────────────────────
     const amounts = sorted.map((t) => Math.abs(Number(t.amount)));
     const avgAmount = amounts.reduce((s, v) => s + v, 0) / amounts.length;
-    const mad = amounts.reduce((s, v) => s + Math.abs(v - avgAmount), 0) / amounts.length;
-    if (mad > avgAmount * 0.10) continue; // > 10 % variance → not a subscription
 
     const last = sorted[sorted.length - 1];
     const nextDate = new Date(new Date(last.booked_at).getTime() + periodDays * 86_400_000);

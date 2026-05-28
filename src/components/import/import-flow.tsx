@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { parseCSVFile, normalizeRows } from "@/lib/csv/parser";
 import { parsePDFFile, type PdfParseResult } from "@/lib/pdf/parser";
 import { findMatchingCategoryId, type Rule } from "@/lib/categorize";
+import { detectTransfers } from "@/app/(app)/accounts/actions";
 import type {
   AmountMode,
   ColumnMapping,
@@ -142,10 +143,12 @@ export function ImportFlow({
       const base = `${t.bookedAt}|${t.amount.toFixed(2)}|${slug}`;
       const occurrence = (groupCounter.get(base) ?? 0) + 1;
       groupCounter.set(base, occurrence);
+      const matchedCategoryId = findMatchingCategoryId(t.description, rules);
       return {
         user_id: user.id,
         account_id: accountId,
-        category_id: findMatchingCategoryId(t.description, rules),
+        category_id: matchedCategoryId,
+        categorization_source: matchedCategoryId ? ("rule" as const) : null,
         booked_at: t.bookedAt,
         description: t.description,
         amount: t.amount,
@@ -198,6 +201,14 @@ export function ImportFlow({
       inserted_count: insertedCount,
       duplicate_count: duplicates,
     });
+
+    // Auto-pair inter-account transfers right after the import so the new
+    // rows don't pollute KPIs in the seconds following the upload.
+    try {
+      await detectTransfers();
+    } catch (err) {
+      console.warn("[Gpadesous] Transfer detection failed (non-blocking):", err);
+    }
 
     setResult({ inserted: insertedCount, duplicates, errors: 0 });
     setStep("done");

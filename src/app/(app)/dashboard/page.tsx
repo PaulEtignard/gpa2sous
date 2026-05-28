@@ -36,7 +36,7 @@ export default async function DashboardPage({
     supabase.from("accounts").select("id, name").order("created_at"),
     supabase
       .from("transactions")
-      .select("id, booked_at, amount, description, category_id, categories(name, color, kind)")
+      .select("id, booked_at, amount, description, category_id, transfer_id, categories(name, color, kind)")
       .order("booked_at", { ascending: false })
       .limit(5000),
   ]);
@@ -96,14 +96,22 @@ export default async function DashboardPage({
   const catKind = (t: TxRow): string | null =>
     (t.categories as unknown as { name: string; color: string; kind: string } | null)?.kind ?? null;
 
+  // A transaction is a "transfer" for KPI purposes if either:
+  //   - its category kind is 'transfer', OR
+  //   - it has been auto-paired with another leg (transfer_id IS NOT NULL).
+  // Pairing wins over category — even a row mis-categorized into a real
+  // expense bucket but paired across accounts is still a transfer.
+  const isTransferRow = (t: TxRow): boolean =>
+    t.transfer_id != null || catKind(t) === "transfer";
+
   // ── Period filter ─────────────────────────────────────────────────────────────
   const inPeriod = tx.filter((t) => {
     const d = new Date(t.booked_at);
     return d >= periodStart && d < periodEnd;
   });
 
-  const operational = inPeriod.filter((t) => catKind(t) !== "transfer");
-  const inPeriodTransfers = inPeriod.filter((t) => catKind(t) === "transfer");
+  const operational = inPeriod.filter((t) => !isTransferRow(t));
+  const inPeriodTransfers = inPeriod.filter(isTransferRow);
   const transferCount = inPeriodTransfers.length;
   const transferVolume = inPeriodTransfers.reduce((s, t) => s + Math.abs(Number(t.amount)), 0);
 
@@ -124,7 +132,7 @@ export default async function DashboardPage({
   const prevNet = tx
     .filter((t) => {
       const d = new Date(t.booked_at);
-      return d >= prevPeriodStart && d < periodStart && catKind(t) !== "transfer";
+      return d >= prevPeriodStart && d < periodStart && !isTransferRow(t);
     })
     .reduce((s, t) => s + Number(t.amount), 0);
 
@@ -162,7 +170,7 @@ export default async function DashboardPage({
   // ── Monthly trend ─────────────────────────────────────────────────────────────
   const monthlyMap = new Map<string, { month: string; income: number; expense: number }>();
   for (const t of tx) {
-    if (catKind(t) === "transfer") continue;
+    if (isTransferRow(t)) continue;
     const d = new Date(t.booked_at);
     const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
     const entry = monthlyMap.get(key) ?? { month: key, income: 0, expense: 0 };
@@ -182,7 +190,7 @@ export default async function DashboardPage({
     description: t.description,
     amount: Number(t.amount),
     cat: t.categories as unknown as { name: string; color: string } | null,
-    isTransfer: catKind(t) === "transfer",
+    isTransfer: isTransferRow(t),
   }));
 
   const now = new Date();

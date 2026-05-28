@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { categorizeWithAI, categorizeBatchCompact, COMPACT_BATCH_SIZE } from "@/lib/ai/categorize";
+import { categorizeWithAI, categorizeBatchCompact } from "@/lib/ai/categorize";
 import { callOpenRouter } from "@/lib/ai/openrouter";
 import { extractMerchantKeyword } from "@/lib/merchant";
 
@@ -12,33 +12,61 @@ export async function updateTransactionCategory(formData: FormData): Promise<voi
   const categoryId = rawCategoryId.length > 0 ? rawCategoryId : null;
 
   const supabase = await createClient();
+  // Form submissions are always manual changes coming from the user.
+  // null means "reset to auto" → manual=false so future rules/AI can re-fill.
   const { error } = await supabase
     .from("transactions")
-    .update({ category_id: categoryId })
+    .update({
+      category_id: categoryId,
+      manual_category: categoryId !== null,
+      categorization_source: categoryId !== null ? "manual" : null,
+    })
     .eq("id", id);
 
   if (error) throw new Error(error.message);
   revalidatePath("/transactions");
   revalidatePath("/dashboard");
+  revalidatePath("/budgets");
 }
 
-/** Direct (non-form) version used by CategorySelect. */
-export async function setCategoryDirect(id: string, categoryId: string | null): Promise<void> {
+/**
+ * Direct (non-form) version used by CategoryCombobox.
+ *
+ * `source` controls the lock semantics:
+ *   - "manual" → user-driven change, locks the row against rule/AI
+ *   - "rule"   → produced by addRule / seedDefaultRules
+ *   - "ai"     → produced by an AI pass
+ *
+ * Setting categoryId to null with source="manual" resets the row to "auto"
+ * (manual_category=false) so future rule/AI passes can fill it again.
+ */
+export async function setCategoryDirect(
+  id: string,
+  categoryId: string | null,
+  source: "manual" | "rule" | "ai" = "manual",
+): Promise<void> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Non authentifié.");
 
+  const isManual = source === "manual" && categoryId !== null;
+
   const { error } = await supabase
     .from("transactions")
-    .update({ category_id: categoryId })
+    .update({
+      category_id: categoryId,
+      manual_category: isManual,
+      categorization_source: categoryId !== null ? source : null,
+    })
     .eq("id", id)
     .eq("user_id", user.id);
 
   if (error) throw new Error(error.message);
   revalidatePath("/transactions");
   revalidatePath("/dashboard");
+  revalidatePath("/budgets");
 }
 
 /**
@@ -73,7 +101,8 @@ export async function findSimilarMerchants(
 
 /**
  * Bulk-categorize all transactions whose description contains `keyword` and
- * that are not already in `categoryId`.
+ * that are not already in `categoryId`. User has explicitly confirmed the
+ * change in a modal, so we mark them as manual.
  */
 export async function bulkCategorizeByMerchant(
   keyword: string,
@@ -89,7 +118,11 @@ export async function bulkCategorizeByMerchant(
 
   const { error } = await supabase
     .from("transactions")
-    .update({ category_id: categoryId })
+    .update({
+      category_id: categoryId,
+      manual_category: true,
+      categorization_source: "manual",
+    })
     .eq("user_id", user.id)
     .ilike("description", `%${keyword}%`)
     .or(`category_id.neq.${categoryId},category_id.is.null`);
@@ -114,10 +147,11 @@ export async function deleteTransaction(formData: FormData): Promise<void> {
 /**
  * AI-categorize all uncategorized transactions for the current user.
  *
- * Constraints (per the user's request):
+ * Constraints:
  *   - Only categories the user actually owns are valid outputs
- *   - We update in batches to keep the round-trip count low
- *   - If the OpenRouter call fails partway, we keep the rows that succeeded
+ *   - manual_category=true rows are skipped (already uncategorized rows can't be
+ *     manual anyway, but the filter is explicit for safety)
+ *   - Updates tag categorization_source='ai' so the UI can show the source
  */
 export async function aiCategorizeUncategorized(): Promise<{
   scanned: number;
@@ -138,6 +172,7 @@ export async function aiCategorizeUncategorized(): Promise<{
       .select("id, description, amount, booked_at")
       .eq("user_id", user.id)
       .is("category_id", null)
+      .eq("manual_category", false)
       .order("booked_at", { ascending: false })
       .limit(500),
   ]);
@@ -173,7 +208,6 @@ export async function aiCategorizeUncategorized(): Promise<{
   let categorized = 0;
   let skipped = 0;
 
-  // Group by category for batched updates
   const byCategory = new Map<string, string[]>();
   for (const r of results) {
     if (!r.categoryId) {
@@ -188,8 +222,12 @@ export async function aiCategorizeUncategorized(): Promise<{
   for (const [categoryId, ids] of byCategory.entries()) {
     const { error } = await supabase
       .from("transactions")
-      .update({ category_id: categoryId })
-      .in("id", ids);
+      .update({
+        category_id: categoryId,
+        categorization_source: "ai",
+      })
+      .in("id", ids)
+      .eq("manual_category", false);
     if (error) {
       errors.push(error.message);
       skipped += ids.length;
@@ -224,6 +262,7 @@ export async function getUncategorizedTransactions(): Promise<{
       .select("id, description, amount, booked_at")
       .eq("user_id", user.id)
       .is("category_id", null)
+      .eq("manual_category", false)
       .order("booked_at", { ascending: false }),
     supabase
       .from("categories")
@@ -263,9 +302,7 @@ export async function aiCategorizeSingleTransaction(
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Non authentifié.");
 
-  const categoryList = categories
-    .map((c) => `- ${c.name}`)
-    .join("\n");
+  const categoryList = categories.map((c) => `- ${c.name}`).join("\n");
 
   const sign = amount < 0 ? "-" : "+";
   const prompt = `Classe cette transaction bancaire française dans la catégorie la plus adaptée.
@@ -280,14 +317,12 @@ Réponds avec uniquement le nom exact de la catégorie, rien d'autre.`;
 
   const raw = await callOpenRouter([{ role: "user", content: prompt }], { temperature: 0 });
 
-  // Normalize and match
   const normalize = (s: string) =>
     s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
 
   const answer = normalize(raw.trim().replace(/^["'`]|["'`]$/g, ""));
   const matched = categories.find((c) => normalize(c.name) === answer);
 
-  // Fuzzy fallback: the model sometimes wraps the name in a sentence
   const fuzzyMatch =
     matched ??
     categories.find((c) => answer.includes(normalize(c.name))) ??
@@ -298,9 +333,13 @@ Réponds avec uniquement le nom exact de la catégorie, rien d'autre.`;
   if (categoryId) {
     const { error } = await supabase
       .from("transactions")
-      .update({ category_id: categoryId })
+      .update({
+        category_id: categoryId,
+        categorization_source: "ai",
+      })
       .eq("id", txId)
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .eq("manual_category", false);
     if (error) throw new Error(error.message);
   }
 
@@ -333,7 +372,6 @@ export async function aiCategorizeBatchAndSave(
     return { categorized: 0, errors };
   }
 
-  // Group by category for a single UPDATE per category
   const byCategory = new Map<string, string[]>();
   for (const r of results) {
     if (!r.categoryId) continue;
@@ -346,9 +384,13 @@ export async function aiCategorizeBatchAndSave(
   for (const [catId, ids] of byCategory.entries()) {
     const { error } = await supabase
       .from("transactions")
-      .update({ category_id: catId })
+      .update({
+        category_id: catId,
+        categorization_source: "ai",
+      })
       .in("id", ids)
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .eq("manual_category", false);
     if (error) {
       errors.push(error.message);
     } else {
@@ -362,9 +404,6 @@ export async function aiCategorizeBatchAndSave(
 // ---------------------------------------------------------------------------
 // Background job — fire and forget via after()
 // ---------------------------------------------------------------------------
-// Background job — create the record only; the Route Handler /api/jobs/run
-// does the actual AI work (works in both next dev and next start).
-// ---------------------------------------------------------------------------
 
 export async function startCategorizationJob(): Promise<{ jobId: string; alreadyRunning: boolean }> {
   const supabase = await createClient();
@@ -373,7 +412,6 @@ export async function startCategorizationJob(): Promise<{ jobId: string; already
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Non authentifié.");
 
-  // Guard: return the existing job if one is already active for this user
   const { data: existing } = await supabase
     .from("jobs")
     .select("id")
@@ -414,3 +452,4 @@ export async function getJobStatus(jobId: string): Promise<{
     result: data.result as { scanned?: number; categorized?: number; errors?: string[]; error?: string } | null,
   };
 }
+

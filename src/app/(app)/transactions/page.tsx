@@ -8,10 +8,27 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn, formatCurrency, formatDate } from "@/lib/utils";
 import { deleteTransaction } from "./actions";
 import { AiCategorizeButton } from "@/components/transactions/ai-categorize-button";
-import { CategorySelect } from "@/components/transactions/category-select";
+import { CategoryCombobox } from "@/components/transactions/category-combobox";
 import { DescriptionRuleCreator } from "@/components/transactions/description-rule-creator";
+import { FilterSelect } from "@/components/transactions/filter-select";
+import type { CategorizationSource } from "@/types/database";
 
 const PAGE_SIZE = 50;
+
+function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
+  // NOTE: <div> rather than <label> — a label that wraps a <button> can
+  // intercept clicks in some browsers and interferes with the FilterSelect
+  // trigger. The header span is purely cosmetic so no label association
+  // is required.
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
 
 type Params = {
   account?: string;
@@ -70,7 +87,7 @@ export default async function TransactionsPage({
   let txQuery = supabase
     .from("transactions")
     .select(
-      "id, booked_at, description, amount, currency, account_id, category_id, accounts(name), categories(name, color, kind)",
+      "id, booked_at, description, amount, currency, account_id, category_id, transfer_id, categorization_source, accounts(name), categories(name, color, kind)",
       { count: "exact" },
     )
     .order("booked_at", { ascending: false })
@@ -92,6 +109,7 @@ export default async function TransactionsPage({
     { data: categories },
     { count: uncategorizedCount },
     { data: activeJob },
+    { data: statsRaw },
   ] = await Promise.all([
     txQuery,
     supabase.from("accounts").select("id, name").order("name"),
@@ -109,7 +127,37 @@ export default async function TransactionsPage({
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    // Empty-string params come from form-submitted blank inputs and must be
+    // treated as "no filter" (null), otherwise the RPC's branches like
+    // `p_type IS NULL OR p_type = 'credit'` evaluate to false and silently
+    // zero out the KPIs even though the table itself shows rows.
+    supabase.rpc("get_transaction_stats", {
+      p_account_id:    params.account || null,
+      p_category_id:   params.cat && params.cat !== "uncategorized" ? params.cat : null,
+      p_uncategorized: params.cat === "uncategorized",
+      p_type:          params.type   || null,
+      p_search:        params.q      || null,
+      p_from:          params.from   || null,
+      p_to:            params.to ? params.to + "T23:59:59" : null,
+    }),
   ]);
+
+  // ── Unpack RPC result ──────────────────────────────────────────────────────
+  type CatStat = { name: string; color: string; total: number; count: number };
+  const stats = statsRaw as {
+    total_expenses: number;
+    total_income:   number;
+    count_expenses: number;
+    count_income:   number;
+    total_count:    number;
+    by_category:    CatStat[];
+  } | null;
+
+  const totalExpenses = stats?.total_expenses ?? 0;
+  const totalIncome   = stats?.total_income   ?? 0;
+  const netBalance    = totalIncome + totalExpenses;
+  const catStats      = stats?.by_category ?? [];
+  const maxExpense    = catStats.length > 0 ? Math.abs(catStats[0].total) : 1;
 
   const total      = totalCount ?? 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);
@@ -137,85 +185,87 @@ export default async function TransactionsPage({
 
       {/* ── Filters ───────────────────────────────────────────────────────── */}
       <Card>
-        <CardContent className="p-4">
-          {/* Filters reset page to 1 automatically (no hidden page input) */}
-          <form className="flex flex-wrap items-end gap-3">
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Compte</label>
-              <select
-                name="account"
-                defaultValue={params.account ?? ""}
-                className="h-9 cursor-pointer rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition-all"
-              >
-                <option value="">Tous</option>
-                {(accounts ?? []).map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
+        <CardContent className="p-5">
+          <form className="space-y-4">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-6">
+              <FilterField label="Compte">
+                <FilterSelect
+                  key={`account-${params.account ?? ""}`}
+                  name="account"
+                  defaultValue={params.account ?? ""}
+                  placeholder="Tous"
+                  autoSubmit
+                  options={[
+                    { value: "", label: "Tous" },
+                    ...(accounts ?? []).map((a) => ({ value: a.id, label: a.name })),
+                  ]}
+                />
+              </FilterField>
+
+              <FilterField label="Catégorie">
+                <FilterSelect
+                  key={`cat-${params.cat ?? ""}`}
+                  name="cat"
+                  defaultValue={params.cat ?? ""}
+                  placeholder="Toutes"
+                  searchable
+                  autoSubmit
+                  options={[
+                    { value: "", label: "Toutes" },
+                    { value: "uncategorized", label: "Non catégorisées" },
+                    ...(categories ?? []).map((c) => ({
+                      value: c.id,
+                      label: c.name,
+                      color: c.color,
+                    })),
+                  ]}
+                />
+              </FilterField>
+
+              <FilterField label="Type">
+                <FilterSelect
+                  key={`type-${params.type ?? ""}`}
+                  name="type"
+                  defaultValue={params.type ?? ""}
+                  placeholder="Tous"
+                  autoSubmit
+                  options={[
+                    { value: "",       label: "Tous" },
+                    { value: "credit", label: "Crédits" },
+                    { value: "debit",  label: "Débits" },
+                  ]}
+                />
+              </FilterField>
+
+              <FilterField label="Du">
+                <input
+                  type="date"
+                  name="from"
+                  defaultValue={params.from ?? ""}
+                  className="h-9 w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition-all [color-scheme:dark]"
+                />
+              </FilterField>
+
+              <FilterField label="Au">
+                <input
+                  type="date"
+                  name="to"
+                  defaultValue={params.to ?? ""}
+                  className="h-9 w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition-all [color-scheme:dark]"
+                />
+              </FilterField>
+
+              <FilterField label="Recherche">
+                <input
+                  name="q"
+                  defaultValue={params.q ?? ""}
+                  placeholder="Ex : carrefour"
+                  className="h-9 w-full rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground placeholder:text-zinc-700 focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition-all"
+                />
+              </FilterField>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Catégorie</label>
-              <select
-                name="cat"
-                defaultValue={params.cat ?? ""}
-                className="h-9 cursor-pointer rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition-all"
-              >
-                <option value="">Toutes</option>
-                <option value="uncategorized">Non catégorisées</option>
-                {(categories ?? []).map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Type</label>
-              <select
-                name="type"
-                defaultValue={params.type ?? ""}
-                className="h-9 cursor-pointer rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition-all"
-              >
-                <option value="">Tous</option>
-                <option value="credit">Crédits</option>
-                <option value="debit">Débits</option>
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Du</label>
-              <input
-                type="date"
-                name="from"
-                defaultValue={params.from ?? ""}
-                className="h-9 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition-all [color-scheme:dark]"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Au</label>
-              <input
-                type="date"
-                name="to"
-                defaultValue={params.to ?? ""}
-                className="h-9 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition-all [color-scheme:dark]"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Recherche</label>
-              <input
-                name="q"
-                defaultValue={params.q ?? ""}
-                placeholder="Ex : carrefour"
-                className="h-9 rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 text-sm text-foreground placeholder:text-zinc-700 focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/15 transition-all"
-              />
-            </div>
-
-            <div className="flex gap-2">
-              <Button type="submit" size="sm" variant="outline">
-                Filtrer
-              </Button>
+            <div className="flex items-center justify-end gap-2 border-t border-white/[0.04] pt-3">
               {(params.account || params.cat || params.type || params.q || params.from || params.to) && (
                 <Link href="/transactions">
                   <Button type="button" size="sm" variant="ghost" className="text-muted-foreground">
@@ -223,10 +273,85 @@ export default async function TransactionsPage({
                   </Button>
                 </Link>
               )}
+              <Button type="submit" size="sm" variant="outline">
+                Filtrer
+              </Button>
             </div>
           </form>
         </CardContent>
       </Card>
+
+      {/* ── Stats — always shown, even when the filter narrows results ────── */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Dépenses</p>
+          <p className="mt-1 text-xl font-bold tabular-nums text-destructive">
+            {formatCurrency(totalExpenses)}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {stats?.count_expenses ?? 0} transaction{(stats?.count_expenses ?? 0) > 1 ? "s" : ""}
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Revenus</p>
+          <p className="mt-1 text-xl font-bold tabular-nums text-success">
+            +{formatCurrency(totalIncome)}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {stats?.count_income ?? 0} transaction{(stats?.count_income ?? 0) > 1 ? "s" : ""}
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Solde net</p>
+          <p className={cn("mt-1 text-xl font-bold tabular-nums", netBalance >= 0 ? "text-success" : "text-destructive")}>
+            {netBalance >= 0 ? "+" : ""}{formatCurrency(netBalance)}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {stats?.total_count ?? 0} transaction{(stats?.total_count ?? 0) > 1 ? "s" : ""} au total
+          </p>
+        </div>
+      </div>
+
+      {/* ── Répartition par catégorie — always shown ───────────────────────── */}
+      <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
+        <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          Dépenses par catégorie
+        </p>
+        {catStats.length === 0 ? (
+          <p className="py-4 text-center text-xs text-muted-foreground">
+            Aucune dépense catégorisée sur ce filtre.
+          </p>
+        ) : (
+          <div className="space-y-2.5">
+            {catStats.map((c) => (
+              <div key={c.name} className="flex items-center gap-3">
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: c.color }}
+                />
+                <span className="w-36 truncate text-sm text-foreground">{c.name}</span>
+                <div className="relative flex-1 h-1.5 rounded-full bg-white/[0.05]">
+                  <div
+                    className="absolute inset-y-0 left-0 rounded-full opacity-70"
+                    style={{
+                      width: `${(Math.abs(c.total) / maxExpense) * 100}%`,
+                      backgroundColor: c.color,
+                    }}
+                  />
+                </div>
+                <span className="w-24 text-right font-mono text-sm tabular-nums text-destructive">
+                  {formatCurrency(c.total)}
+                </span>
+                <span className="w-20 text-right text-xs text-muted-foreground">
+                  {c.count} tx
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* ── Table ─────────────────────────────────────────────────────────── */}
       <Card>
@@ -247,21 +372,28 @@ export default async function TransactionsPage({
               {(transactions ?? []).map((t) => {
                 const account    = t.accounts    as unknown as { name: string } | null;
                 const cat        = t.categories  as unknown as { name: string; color: string; kind: string } | null;
-                const isTransfer = cat?.kind === "transfer";
+                const isTransferKind = cat?.kind === "transfer";
+                const isPaired       = t.transfer_id != null;
+                const isTransfer     = isTransferKind || isPaired;
                 return (
                   <TableRow key={t.id}>
                     <TableCell className="font-mono text-xs text-muted-foreground">
                       {formatDate(t.booked_at)}
                     </TableCell>
 
-                    <TableCell className="max-w-[260px]">
-                      <div className="flex items-center gap-2">
-                        <DescriptionRuleCreator
-                          description={t.description}
-                          categories={categories ?? []}
-                        />
+                    <TableCell className="min-w-[260px] max-w-[480px]">
+                      <div className="flex items-start gap-2">
+                        <div className="min-w-0 flex-1">
+                          <DescriptionRuleCreator
+                            description={t.description}
+                            categories={categories ?? []}
+                          />
+                        </div>
                         {isTransfer && (
-                          <span className="shrink-0 rounded px-1 text-[10px] font-semibold uppercase tracking-wide text-primary/60 ring-1 ring-primary/20">
+                          <span
+                            className="mt-0.5 shrink-0 rounded px-1 text-[10px] font-semibold uppercase tracking-wide text-primary/60 ring-1 ring-primary/20"
+                            title={isPaired ? "Virement inter-comptes appairé" : "Catégorie de transfert"}
+                          >
                             virement
                           </span>
                         )}
@@ -273,10 +405,12 @@ export default async function TransactionsPage({
                     </TableCell>
 
                     <TableCell>
-                      <CategorySelect
+                      <CategoryCombobox
                         transactionId={t.id}
                         description={t.description}
                         categoryId={t.category_id ?? null}
+                        source={(t.categorization_source ?? null) as CategorizationSource}
+                        isTransfer={isTransfer}
                         categories={categories ?? []}
                       />
                     </TableCell>

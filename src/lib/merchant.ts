@@ -24,9 +24,16 @@ const STOP_WORDS = new Set([
   "payment", "transfer", "deposit", "refund", "charge", "fee", "debit",
   "credit", "from", "into", "by", "to", "at", "in", "on", "and", "the",
   "for", "of", "current", "pending", "completed", "direct",
-  // Card/banking jargon
+  // Card/banking jargon + bank abbreviations
   "carte", "cb", "visa", "mastercard", "maestro", "amex", "pay", "pmt",
-  "chq", "cheque", "sepa", "iban", "bic", "swift", "ref",
+  "chq", "cheque", "sepa", "iban", "bic", "swift", "ref", "prlv", "vir",
+  "inst", "instant", "ecom", "tpe", "dab", "atm", "fact", "rib", "txn",
+  // Currencies
+  "eur", "euro", "euros", "usd", "gbp", "chf", "cad", "jpy", "dollar",
+  "dollars", "pounds", "currency",
+  // Country codes & generic locations (often appear in bank descriptions)
+  "fr", "be", "lu", "ch", "uk", "us", "ca", "es", "it", "de", "nl", "pt",
+  "fra", "ger", "esp", "ita", "gbr", "france", "paris", "lyon", "lille",
 ]);
 
 function normalizeForStopCheck(word: string): string {
@@ -35,6 +42,29 @@ function normalizeForStopCheck(word: string): string {
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "") // strip diacritics
     .replace(/[^a-z0-9]/g, "");      // keep only alphanumeric
+}
+
+/**
+ * True when a token looks like a card mask or bank reference number:
+ *   X5327, XXXX1234, *1234, ****1234, 12345678 (very long numeric), etc.
+ * These leak through the "stop words" check because they have ≥ 3 chars
+ * and aren't purely numeric, yet they are common to every card payment of
+ * a given user — which destroys merchant grouping when used as a keyword.
+ */
+function isCardMaskOrRef(token: string): boolean {
+  // Single letter followed by digits: "X5327", "x1234", "N12345"
+  if (/^[A-Za-z]\d{3,}$/.test(token)) return true;
+  // Multiple X's possibly followed by digits: "XXXX", "XXXX1234"
+  if (/^[Xx*]{2,}\d*$/.test(token)) return true;
+  // Long numeric (already filtered by /^\d+$/ but keep for safety)
+  if (/^\d{6,}$/.test(token)) return true;
+  // High digit density: ≥ 50 % digits in a token ≥ 4 chars (covers
+  // bank reference numbers like "REF12345AB", "TX87654321X")
+  if (token.length >= 4) {
+    const digits = (token.match(/\d/g) ?? []).length;
+    if (digits / token.length >= 0.5) return true;
+  }
+  return false;
 }
 
 /**
@@ -49,7 +79,8 @@ export function extractMerchantKeyword(description: string): string | null {
     // Remove leading/trailing non-alphanumeric (quotes, dots, etc.)
     const cleaned = raw.replace(/^[^a-zA-ZÀ-ÖØ-öø-ÿ0-9]+|[^a-zA-ZÀ-ÖØ-öø-ÿ0-9]+$/g, "");
     if (cleaned.length < 3) continue;
-    if (/^\d+$/.test(cleaned)) continue; // skip pure numbers
+    if (/^\d+$/.test(cleaned)) continue;          // pure numbers
+    if (isCardMaskOrRef(cleaned)) continue;       // X5327, XXXX1234, REF12345…
 
     const norm = normalizeForStopCheck(cleaned);
     if (STOP_WORDS.has(norm)) continue;

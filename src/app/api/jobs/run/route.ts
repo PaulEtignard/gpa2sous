@@ -51,6 +51,7 @@ export async function POST(request: Request) {
         .select("id, description, amount, booked_at")
         .eq("user_id", userId)
         .is("category_id", null)
+        .eq("manual_category", false)
         .order("booked_at", { ascending: false }),
       supabase
         .from("categories")
@@ -110,9 +111,10 @@ export async function POST(request: Request) {
           for (const [catId, ids] of byCategory.entries()) {
             const { error } = await supabase
               .from("transactions")
-              .update({ category_id: catId })
+              .update({ category_id: catId, categorization_source: "ai" })
               .in("id", ids)
-              .eq("user_id", userId);
+              .eq("user_id", userId)
+              .eq("manual_category", false);
             if (error) errors.push(error.message);
             else totalCategorized += ids.length;
           }

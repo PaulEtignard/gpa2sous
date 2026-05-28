@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { createPortal } from "react-dom";
+import { Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { addRuleDirect } from "@/app/(app)/categories/actions";
 
@@ -16,11 +17,6 @@ interface Props {
   categories: Category[];
 }
 
-interface PlusPos {
-  x: number;
-  y: number;
-}
-
 interface DialogState {
   keyword: string;
   categoryId: string;
@@ -29,52 +25,38 @@ interface DialogState {
 // Words that are too generic to make useful keyword rules
 const NOISE = new Set([
   "paiement", "pmt", "payment", "virement", "vir", "cb", "carte", "sepa",
+  "prlv", "psc", "inst", "instant", "fact", "ref",
   "de", "du", "la", "le", "les", "au", "a", "en", "par", "pour", "sur",
   "et", "ou", "avec", "the", "by", "from", "to", "in", "on", "at",
+  "fr", "eur", "euro", "usd",
 ]);
 
 function isNoise(word: string) {
   return NOISE.has(word.toLowerCase()) || /^\d+$/.test(word) || word.length < 2;
 }
 
+/** Pick the most meaningful word for the default keyword suggestion. */
+function defaultKeyword(words: string[]): string {
+  // Prefer the longest non-noise word — usually the merchant name.
+  const candidates = words.filter((w) => !isNoise(w));
+  if (candidates.length === 0) return words[0] ?? "";
+  return [...candidates].sort((a, b) => b.length - a.length)[0];
+}
+
 export function DescriptionRuleCreator({ description, categories }: Props) {
-  const leaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [dialog, setDialog]   = useState<DialogState | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const [saved, setSaved]     = useState(false);
 
-  const [hoveredWord, setHoveredWord] = useState<string | null>(null);
-  const [plusPos,     setPlusPos]     = useState<PlusPos>({ x: 0, y: 0 });
-  const [dialog,      setDialog]      = useState<DialogState | null>(null);
-  const [isPending,   startTransition] = useTransition();
-  const [saved,       setSaved]       = useState(false);
+  // Collapse multi-line bank descriptions ("PAIEMENT PAR CARTE\nX1234 …")
+  // into a single readable line so the row stays compact.
+  const cleanDescription = description.replace(/\s+/g, " ").trim();
+  const words = cleanDescription.split(" ").filter(Boolean);
 
-  const words = description.split(/\s+/).filter(Boolean);
-
-  // ── Word hover handlers ──────────────────────────────────────────────────
-  function onWordEnter(word: string, e: React.MouseEvent<HTMLSpanElement>) {
-    clearTimeout(leaveTimer.current);
-    const rect = e.currentTarget.getBoundingClientRect();
-    setHoveredWord(word);
-    setPlusPos({ x: rect.right + 4, y: rect.top - 6 });
-  }
-
-  function onWordLeave() {
-    // Small delay so the cursor can move to the "+" button without it disappearing
-    leaveTimer.current = setTimeout(() => setHoveredWord(null), 120);
-  }
-
-  function onPlusEnter() {
-    clearTimeout(leaveTimer.current);
-  }
-
-  function onPlusLeave() {
-    leaveTimer.current = setTimeout(() => setHoveredWord(null), 120);
-  }
-
-  // ── Dialog ───────────────────────────────────────────────────────────────
-  function openDialog(word: string) {
-    setHoveredWord(null);
+  function openDialog() {
     setSaved(false);
     setDialog({
-      keyword: word,
+      keyword: defaultKeyword(words),
       categoryId: categories[0]?.id ?? "",
     });
   }
@@ -95,52 +77,24 @@ export function DescriptionRuleCreator({ description, categories }: Props) {
 
   return (
     <>
-      {/* ── Description with hoverable words ──────────────────────────── */}
-      <div
-        className="flex max-w-[280px] items-center overflow-hidden"
-        style={{ whiteSpace: "nowrap" }}
-      >
-        {words.map((word, i) => (
-          <span key={i} className="contents">
-            <span
-              onMouseEnter={(e) => onWordEnter(word, e)}
-              onMouseLeave={onWordLeave}
-              className={cn(
-                "shrink-0 rounded-sm px-px font-medium transition-colors",
-                !dialog && hoveredWord === word
-                  ? isNoise(word)
-                    ? "bg-muted text-muted-foreground"
-                    : "bg-primary/15 text-primary cursor-pointer"
-                  : "",
-              )}
-            >
-              {word}
-            </span>
-            {i < words.length - 1 && (
-              <span className="shrink-0 select-none">&nbsp;</span>
-            )}
-          </span>
-        ))}
+      {/* ── Description + magic-wand action ───────────────────────────── */}
+      <div className="group/desc flex min-w-0 items-start gap-2">
+        <span
+          className="min-w-0 flex-1 break-words text-sm font-medium leading-snug"
+          title={cleanDescription}
+        >
+          {cleanDescription}
+        </span>
+        <button
+          type="button"
+          onClick={openDialog}
+          title="Créer une règle à partir d'un mot"
+          aria-label="Créer une règle à partir d'un mot"
+          className="mt-0.5 inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-zinc-600 opacity-0 transition-all hover:bg-primary/15 hover:text-primary group-hover/desc:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          <Wand2 className="h-3.5 w-3.5" />
+        </button>
       </div>
-
-      {/* ── "+" button rendered in document.body (escapes overflow:hidden) ─ */}
-      {hoveredWord && !dialog && typeof document !== "undefined" &&
-        createPortal(
-          <button
-            onMouseEnter={onPlusEnter}
-            onMouseLeave={onPlusLeave}
-            onMouseDown={(e) => {
-              e.preventDefault();
-              openDialog(hoveredWord);
-            }}
-            className="fixed z-[9999] flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-white shadow-lg transition-transform hover:scale-110"
-            style={{ left: plusPos.x, top: plusPos.y, lineHeight: 1 }}
-            title={`Créer une règle sur "${hoveredWord}"`}
-          >
-            +
-          </button>,
-          document.body,
-        )}
 
       {/* ── Rule creation dialog ───────────────────────────────────────── */}
       {dialog && typeof document !== "undefined" &&
@@ -153,7 +107,6 @@ export function DescriptionRuleCreator({ description, categories }: Props) {
               className="mx-4 w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Header */}
               <div className="mb-5">
                 <h3 className="text-base font-semibold">Créer une règle</h3>
                 <p className="mt-0.5 text-xs text-muted-foreground">
@@ -241,7 +194,7 @@ export function DescriptionRuleCreator({ description, categories }: Props) {
               {/* Actions */}
               <div className="flex items-center justify-between">
                 <p className="text-[11px] text-muted-foreground">
-                  S'appliquera aux transactions non catégorisées existantes.
+                  S&apos;appliquera aux transactions non catégorisées existantes.
                 </p>
                 <div className="flex shrink-0 gap-2">
                   <button

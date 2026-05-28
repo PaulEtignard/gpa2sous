@@ -24,6 +24,8 @@ export interface Category {
   created_at: string;
 }
 
+export type CategorizationSource = "rule" | "ai" | "manual" | null;
+
 export interface Transaction {
   id: string;
   user_id: string;
@@ -38,6 +40,9 @@ export interface Transaction {
   external_id: string | null;
   notes: string | null;
   created_at: string;
+  transfer_id: string | null;
+  manual_category: boolean;
+  categorization_source: CategorizationSource;
 }
 
 export interface RuleRow {

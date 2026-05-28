@@ -35,7 +35,12 @@ export async function restoreSubscription(formData: FormData) {
   revalidatePath("/subscriptions");
 }
 
-/** Re-scan: wipe all enrichment data so the next page load re-detects and re-enriches. */
+/**
+ * Re-scan from scratch: deletes all active (non-dismissed) subscriptions and
+ * lets the next /subscriptions render re-detect them with the current
+ * detection rules. Dismissed subs (active=false) are preserved so users don't
+ * have to re-dismiss the same false positives every time they rescan.
+ */
 export async function rescanSubscriptions() {
   const supabase = await createClient();
   const {
@@ -43,11 +48,11 @@ export async function rescanSubscriptions() {
   } = await supabase.auth.getUser();
   if (!user) return;
 
-  // Clear all enrichment so the page re-runs detection + AI logo resolution
   await supabase
     .from("subscriptions")
-    .update({ display_name: null, domain: null, logo_url: null })
-    .eq("user_id", user.id);
+    .delete()
+    .eq("user_id", user.id)
+    .eq("active", true);
 
   revalidatePath("/subscriptions");
 }

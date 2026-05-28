@@ -127,12 +127,13 @@ export async function addRuleDirect(pattern: string, categoryId: string): Promis
   });
   if (error) throw new Error(error.message);
 
-  // Retroactively apply to uncategorized transactions
+  // Retroactively apply to uncategorized, non-manual transactions.
   await supabase
     .from("transactions")
-    .update({ category_id: categoryId })
+    .update({ category_id: categoryId, categorization_source: "rule" })
     .ilike("description", `%${trimmed}%`)
     .is("category_id", null)
+    .eq("manual_category", false)
     .eq("user_id", user.id);
 
   revalidatePath("/categories");
@@ -160,14 +161,12 @@ export async function addRule(formData: FormData): Promise<void> {
   });
   if (error) throw new Error(error.message);
 
-  // Apply the new rule retroactively to existing uncategorized transactions.
-  // ilike is case-insensitive; bank descriptions are typically ASCII-only so
-  // diacritics are rarely an issue. We only touch rows with no category yet.
   await supabase
     .from("transactions")
-    .update({ category_id: categoryId })
+    .update({ category_id: categoryId, categorization_source: "rule" })
     .ilike("description", `%${pattern}%`)
     .is("category_id", null)
+    .eq("manual_category", false)
     .eq("user_id", user.id);
 
   revalidatePath("/categories");
@@ -222,12 +221,14 @@ export async function seedDefaultRules(): Promise<void> {
       arr.push(tx.id);
       byCategory.set(catId, arr);
     }
-    // One UPDATE per category (uses an IN clause — efficient)
+    // One UPDATE per category (uses an IN clause — efficient).
+    // Skip manual_category=true rows so user overrides are preserved.
     for (const [catId, ids] of byCategory.entries()) {
       await supabase
         .from("transactions")
-        .update({ category_id: catId })
+        .update({ category_id: catId, categorization_source: "rule" })
         .in("id", ids)
+        .eq("manual_category", false)
         .eq("user_id", user.id);
     }
   }

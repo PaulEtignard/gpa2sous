@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createAccount, deleteAccount } from "./actions";
+import { DetectTransfersButton } from "@/components/accounts/detect-transfers-button";
 
 export default async function AccountsPage() {
   const supabase = await createClient();
@@ -16,10 +17,23 @@ export default async function AccountsPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: accounts } = await supabase
-    .from("accounts")
-    .select("id, name, bank, currency, initial_balance, created_at")
-    .order("created_at");
+  const [{ data: accounts }, { count: pairedCount }, { count: unpairedCount }] = await Promise.all([
+    supabase
+      .from("accounts")
+      .select("id, name, bank, currency, initial_balance, created_at")
+      .order("created_at"),
+    supabase
+      .from("transactions")
+      .select("id", { count: "exact", head: true })
+      .not("transfer_id", "is", null),
+    supabase
+      .from("transactions")
+      .select("id", { count: "exact", head: true })
+      .is("transfer_id", null),
+  ]);
+
+  const hasMultipleAccounts = (accounts ?? []).length >= 2;
+  const pairedPairs = Math.floor((pairedCount ?? 0) / 2);
 
   return (
     <div className="space-y-6">
@@ -29,6 +43,24 @@ export default async function AccountsPage() {
           Déclare un compte par produit bancaire que tu veux suivre.
         </p>
       </div>
+
+      {hasMultipleAccounts && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Virements inter-comptes</p>
+              <p className="text-xs text-muted-foreground">
+                {pairedPairs > 0
+                  ? `${pairedPairs} paire${pairedPairs > 1 ? "s" : ""} déjà détectée${pairedPairs > 1 ? "s" : ""}. `
+                  : "Aucune paire détectée pour l'instant. "}
+                Détecter ré-analyse les transactions non appairées (~{unpairedCount ?? 0}) pour
+                trouver les paires manquantes — ces lignes sortent automatiquement des KPIs.
+              </p>
+            </div>
+            <DetectTransfersButton />
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

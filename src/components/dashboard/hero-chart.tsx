@@ -91,11 +91,11 @@ export function HeroChart({ dailyData, net, income, expense, prevNet, month }: P
                   color: "#fff",
                   boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
                 }}
-                formatter={(v: number) => [
-                  `${v >= 0 ? "+" : ""}${formatCurrency(v)}`,
-                  "Net cumulé",
-                ]}
-                labelFormatter={(l: number) => `Jour ${l}`}
+                formatter={(value) => {
+                  const v = Number(value ?? 0);
+                  return [`${v >= 0 ? "+" : ""}${formatCurrency(v)}`, "Net cumulé"];
+                }}
+                labelFormatter={(label) => `Jour ${label ?? ""}`}
               />
               <Area
                 type="monotone"
