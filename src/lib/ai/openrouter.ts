@@ -69,7 +69,7 @@ export async function callOpenRouter(
   };
 
   if (data.error) {
-    throw new Error(`OpenRouter: ${data.error.message ?? "unknown error"}`);
+    throw new Error(`OpenRouter [${model}]: ${data.error.message ?? JSON.stringify(data.error)}`);
   }
 
   const content = data.choices?.[0]?.message?.content;

@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 export async function dismissSubscription(formData: FormData) {
@@ -50,5 +49,5 @@ export async function rescanSubscriptions() {
     .update({ display_name: null, domain: null, logo_url: null })
     .eq("user_id", user.id);
 
-  redirect("/subscriptions");
+  revalidatePath("/subscriptions");
 }

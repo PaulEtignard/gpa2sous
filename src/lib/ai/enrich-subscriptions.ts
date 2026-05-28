@@ -13,7 +13,6 @@ export interface EnrichedSubscription {
 }
 
 async function resolveLogoUrl(domain: string): Promise<string | null> {
-  // Try Clearbit first (high-quality brand logos)
   const clearbit = `https://logo.clearbit.com/${domain}`;
   try {
     const resp = await fetch(clearbit, {
@@ -26,65 +25,100 @@ async function resolveLogoUrl(domain: string): Promise<string | null> {
   } catch {
     // network error or timeout
   }
-
-  // Fallback: Google S2 favicons (always returns an image)
   return `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
 }
+
+const NULL_DOMAIN = /^(null|none|unknown|n\/a|na|-)$/i;
 
 export async function enrichSubscriptions(
   subscriptions: SubscriptionToEnrich[],
 ): Promise<EnrichedSubscription[]> {
   if (subscriptions.length === 0) return [];
 
-  const lines = subscriptions.map((s, i) => `${i}|${s.exampleDescription}`).join("\n");
+  const lines = subscriptions.map((s, i) => `${i}: ${s.exampleDescription}`).join("\n");
 
-  const prompt = `Identify the company/service name and website domain for each subscription transaction.
-These are French bank account transactions (prélèvements SEPA / virements).
+  const prompt = `You are a financial data API with expert knowledge of companies worldwide.
+Identify the real company or service behind each French bank transaction description.
 
-TRANSACTIONS (index|raw bank description):
-${lines}
+Return ONLY a JSON array — no markdown, no explanation, nothing else.
+Each object: {"i": <index>, "name": "<brand name>", "domain": "<root domain or null>"}
 
-Reply with exactly ${subscriptions.length} lines in this format:
-index|Company Display Name|domain.com
+Examples:
+[{"i":0,"name":"Spotify","domain":"spotify.com"},{"i":1,"name":"JOW","domain":"jow.fr"},{"i":2,"name":"Frais bancaires","domain":null}]
 
 Rules:
-- Use the well-known brand name (e.g. "Spotify", "Netflix", "Amazon Prime")
-- Domain must be the root domain only (e.g. "spotify.com", "netflix.com", "amazon.fr")
-- Write null as the domain when it is a personal payment or truly unknown
-- No explanations, no empty lines, no extra text
+- Use your knowledge to identify ANY company or service — do not limit yourself to a predefined list
+- name: the real brand name as the public knows it (e.g. "Netflix", "Amazon Prime", "EDF")
+- domain: the company's main website root domain — prefer country-specific domain when relevant (e.g. amazon.fr not amazon.com for French services)
+- Set domain to null ONLY when it is a personal bank transfer or a pure bank fee with no identifiable merchant
+- French bank descriptions often contain: merchant name, card number, date, reference — focus on the merchant name
+- PAYLI / PAYLIB prefixes indicate a payment gateway — look at the merchant name after the slash
 
-French services reference (use these exact domains):
-ALMA / ALMA PAY → almapay.com | FREE / FREE MOBILE → free.fr | ORANGE → orange.fr
-SFR → sfr.fr | BOUYGUES → bouyguestelecom.fr | EDF → edf.fr | ENGIE → engie.com
-CANAL+ → canalplus.com | MOLOTOV → molotov.tv | QONTO → qonto.com
-LYDIA → lydia-app.com | PAYFIT → payfit.com | ALAN → alan.com | LUKO → luko.fr`;
+Transactions:
+${lines}`;
 
-  const raw = await callOpenRouter([{ role: "user", content: prompt }], {
-    temperature: 0,
-    maxTokens: subscriptions.length * 30 + 300,
-  });
+  const raw = await callOpenRouter(
+    [
+      {
+        role: "system",
+        content: "You are a data extraction API. Output ONLY the JSON array requested. No prose.",
+      },
+      { role: "user", content: prompt },
+    ],
+    { temperature: 0, maxTokens: subscriptions.length * 40 + 200 },
+  );
 
-  // Parse AI response
+  console.log("[enrich-subscriptions] raw AI response:\n", raw);
+
   const aiResults: { displayName: string; domain: string | null }[] = subscriptions.map((s) => ({
     displayName: s.exampleDescription,
     domain: null,
   }));
 
-  for (const line of raw.split("\n")) {
-    const parts = line.trim().split("|");
-    if (parts.length < 3) continue;
-    const idx = parseInt(parts[0]);
-    if (isNaN(idx) || idx < 0 || idx >= subscriptions.length) continue;
-    const displayName = parts[1]?.trim();
-    const rawDomain = parts[2]?.trim().toLowerCase();
-    const isNull = !rawDomain || /^(null|none|unknown|n\/a|na|-)$/.test(rawDomain);
-    aiResults[idx] = {
-      displayName: displayName || subscriptions[idx].exampleDescription,
-      domain: isNull ? null : rawDomain,
-    };
+  // Primary: extract the LAST JSON array found anywhere in the response
+  // (some models emit thinking text before the actual answer)
+  const jsonMatches = [...raw.matchAll(/\[[\s\S]*?\]/g)];
+  const lastMatch = jsonMatches.at(-1);
+  let parsedFromJson = false;
+
+  if (lastMatch) {
+    try {
+      const arr = JSON.parse(lastMatch[0]) as { i: number; name: string; domain: string | null }[];
+      if (Array.isArray(arr) && arr.length > 0) {
+        for (const item of arr) {
+          const idx = item.i;
+          if (typeof idx !== "number" || idx < 0 || idx >= subscriptions.length) continue;
+          const domain =
+            typeof item.domain === "string" && !NULL_DOMAIN.test(item.domain.trim())
+              ? item.domain.trim().toLowerCase()
+              : null;
+          aiResults[idx] = {
+            displayName: item.name?.trim() || subscriptions[idx].exampleDescription,
+            domain,
+          };
+        }
+        parsedFromJson = true;
+      }
+    } catch {
+      // fall through to pipe parser
+    }
   }
 
-  // Resolve logo URLs server-side (so client never needs a fallback)
+  if (!parsedFromJson) {
+    // Fallback: pipe-separated format (index|name|domain)
+    for (const line of raw.split("\n")) {
+      const parts = line.trim().split("|");
+      if (parts.length < 3) continue;
+      const idx = parseInt(parts[0]);
+      if (isNaN(idx) || idx < 0 || idx >= subscriptions.length) continue;
+      const rawDomain = parts[2]?.trim().toLowerCase();
+      aiResults[idx] = {
+        displayName: parts[1]?.trim() || subscriptions[idx].exampleDescription,
+        domain: !rawDomain || NULL_DOMAIN.test(rawDomain) ? null : rawDomain,
+      };
+    }
+  }
+
   const results = await Promise.all(
     aiResults.map(async (r, i) => ({
       id: subscriptions[i].id,
